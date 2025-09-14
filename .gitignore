@@ -1,207 +1,286 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
+!pip install streamlit plotly
 
-# C extensions
-*.so
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+import io
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+st.set_page_config(page_title="E-commerce Data Storyteller", page_icon=":shopping_cart:", layout="wide")
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+st.title("E-commerce Data Storyteller")
+st.markdown("*Transform your e-commerce data into actionable business insights!*")
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# File upload
+uploaded_file = st.file_uploader("Upload E-commerce CSV", type=['csv'])
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.success(f"Dataset loaded! {len(df):,} rows, {len(df.columns)} columns")
+        
+        # Create tabs
+        tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Analytics", "Insights", "Summary"])
+        
+        with tab1:
+            st.subheader("Dataset Overview")
+            
+            # Metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Rows", f"{len(df):,}")
+            with col2:
+                st.metric("Columns", len(df.columns))
+            with col3:
+                numeric_cols = len(df.select_dtypes(include=[np.number]).columns)
+                st.metric("Numeric Columns", numeric_cols)
+            with col4:
+                missing_pct = (df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+                st.metric("Data Completeness", f"{100-missing_pct:.1f}%")
+            
+            # Data preview
+            st.subheader("Data Preview")
+            st.dataframe(df.head(10), use_container_width=True)
+            
+            # Column info
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Column Types")
+                col_info = pd.DataFrame({
+                    'Column': df.columns,
+                    'Type': df.dtypes.astype(str),
+                    'Non-Null': df.count()
+                })
+                st.dataframe(col_info, use_container_width=True)
+            
+            with col2:
+                st.subheader("Missing Values")
+                missing = df.isnull().sum()
+                missing = missing[missing > 0]
+                if len(missing) > 0:
+                    missing_df = pd.DataFrame({
+                        'Column': missing.index,
+                        'Missing Count': missing.values,
+                        'Missing %': (missing.values / len(df) * 100).round(2)
+                    })
+                    st.dataframe(missing_df, use_container_width=True)
+                else:
+                    st.success("No missing values!")
+        
+        with tab2:
+            st.subheader("Visual Analytics")
+            
+            # Auto-detect column types
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+            
+            # Sales/revenue columns
+            sales_cols = [col for col in df.columns if any(word in col.lower() for word in ['sales', 'amount', 'revenue', 'price', 'value'])]
+            
+            if sales_cols:
+                sales_col = sales_cols[0]
+                
+                # Revenue distribution
+                fig_hist = px.histogram(df, x=sales_col, title=f"Distribution of {sales_col}", nbins=30)
+                st.plotly_chart(fig_hist, use_container_width=True)
+                
+                # Top categories by revenue
+                if categorical_cols:
+                    cat_col = categorical_cols[0]
+                    cat_revenue = df.groupby(cat_col)[sales_col].sum().sort_values(ascending=False).head(10)
+                    
+                    fig_bar = px.bar(
+                        x=cat_revenue.values, 
+                        y=cat_revenue.index,
+                        orientation='h',
+                        title=f"Top Categories by {sales_col}",
+                        labels={'x': sales_col, 'y': cat_col}
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True)
+            
+            # Correlation heatmap
+            if len(numeric_cols) > 1:
+                corr_matrix = df[numeric_cols].corr()
+                fig_corr = px.imshow(
+                    corr_matrix, 
+                    title="Correlation Heatmap",
+                    color_continuous_scale="RdBu"
+                )
+                st.plotly_chart(fig_corr, use_container_width=True)
+            
+            # Time series if date column exists
+            date_cols = [col for col in df.columns if 'date' in col.lower()]
+            if date_cols and sales_cols:
+                try:
+                    date_col = date_cols[0]
+                    df[date_col] = pd.to_datetime(df[date_col])
+                    daily_sales = df.groupby(df[date_col].dt.date)[sales_col].sum()
+                    
+                    fig_time = px.line(
+                        x=daily_sales.index, 
+                        y=daily_sales.values,
+                        title=f"{sales_col} Over Time"
+                    )
+                    st.plotly_chart(fig_time, use_container_width=True)
+                except:
+                    pass
+        
+        with tab3:
+            st.subheader("AI-Generated Business Insights")
+            
+            insights = []
+            
+            # Dataset overview
+            insights.append(f"OVERVIEW: Your dataset contains {len(df):,} records across {len(df.columns)} features")
+            
+            # Revenue insights
+            if sales_cols:
+                sales_col = sales_cols[0]
+                total_revenue = df[sales_col].sum()
+                avg_transaction = df[sales_col].mean()
+                insights.append(f"REVENUE: Total revenue of ${total_revenue:,.2f} with average transaction value of ${avg_transaction:.2f}")
+            
+            # Category insights
+            if categorical_cols:
+                cat_col = categorical_cols[0]
+                top_category = df[cat_col].value_counts().index[0]
+                top_count = df[cat_col].value_counts().iloc[0]
+                insights.append(f"PERFORMANCE: '{top_category}' is the leading category with {top_count} transactions")
+            
+            # Customer insights
+            age_cols = [col for col in df.columns if 'age' in col.lower()]
+            if age_cols:
+                avg_age = df[age_cols[0]].mean()
+                if avg_age < 35:
+                    insights.append(f"CUSTOMERS: Young customer base (avg age: {avg_age:.1f}) - focus on digital marketing")
+                else:
+                    insights.append(f"CUSTOMERS: Mature customer base (avg age: {avg_age:.1f}) - traditional channels may work well")
+            
+            # Rating insights
+            rating_cols = [col for col in df.columns if 'rating' in col.lower()]
+            if rating_cols:
+                avg_rating = df[rating_cols[0]].mean()
+                if avg_rating >= 4.5:
+                    insights.append(f"SATISFACTION: Excellent customer satisfaction ({avg_rating:.2f}/5)")
+                elif avg_rating >= 4.0:
+                    insights.append(f"SATISFACTION: Good customer satisfaction ({avg_rating:.2f}/5) with room for improvement")
+                else:
+                    insights.append(f"WARNING: Customer satisfaction needs attention ({avg_rating:.2f}/5)")
+            
+            # Data quality insight
+            missing_pct = (df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+            if missing_pct < 5:
+                insights.append(f"QUALITY: Excellent data quality with {missing_pct:.1f}% missing values")
+            else:
+                insights.append(f"QUALITY: Data quality needs attention - {missing_pct:.1f}% missing values")
+            
+            # Display insights
+            for i, insight in enumerate(insights, 1):
+                st.info(f"{i}. {insight}")
+            
+            # Recommendations
+            st.subheader("Business Recommendations")
+            recommendations = [
+                "Focus marketing efforts on top-performing categories",
+                "Implement customer segmentation based on purchase behavior", 
+                "Set up automated data quality monitoring",
+                "Create monthly performance dashboards for stakeholders",
+                "Analyze seasonal trends for inventory planning"
+            ]
+            
+            for i, rec in enumerate(recommendations, 1):
+                st.write(f"{i}. {rec}")
+        
+        with tab4:
+            st.subheader("Executive Summary Report")
+            
+            # Key metrics
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if sales_cols:
+                    total_rev = df[sales_cols[0]].sum()
+                    st.metric("Total Revenue", f"${total_rev:,.0f}")
+                st.metric("Total Records", f"{len(df):,}")
+            
+            with col2:
+                if sales_cols:
+                    avg_order = df[sales_cols[0]].mean()
+                    st.metric("Avg Order Value", f"${avg_order:.2f}")
+                st.metric("Data Completeness", f"{100-missing_pct:.1f}%")
+            
+            with col3:
+                if rating_cols:
+                    st.metric("Avg Rating", f"{df[rating_cols[0]].mean():.2f}/5")
+                st.metric("Categories", df[categorical_cols[0]].nunique() if categorical_cols else "N/A")
+            
+            # Summary text
+            st.markdown("### Key Business Findings:")
+            st.write("1. Dataset provides comprehensive view of business performance")
+            st.write("2. Strong foundation for data-driven decision making")
+            st.write("3. Multiple opportunities identified for growth and optimization")
+            
+            # Statistics
+            st.subheader("Statistical Summary")
+            if numeric_cols:
+                st.dataframe(df[numeric_cols].describe(), use_container_width=True)
+            
+            # Export functionality
+            st.subheader("Export Data")
+            if st.button("Generate Summary Report"):
+                summary_text = f"""
+E-COMMERCE DATA ANALYSIS SUMMARY
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-# Translations
-*.mo
-*.pot
+DATASET OVERVIEW:
+- Total Records: {len(df):,}
+- Total Features: {len(df.columns)}
+- Data Completeness: {100-missing_pct:.1f}%
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+KEY METRICS:
+"""
+                if sales_cols:
+                    summary_text += f"- Total Revenue: ${df[sales_cols[0]].sum():,.2f}\n"
+                    summary_text += f"- Average Order Value: ${df[sales_cols[0]].mean():.2f}\n"
+                
+                if rating_cols:
+                    summary_text += f"- Customer Satisfaction: {df[rating_cols[0]].mean():.2f}/5\n"
+                
+                st.download_button(
+                    "Download Summary Report",
+                    summary_text,
+                    "ecommerce_summary.txt",
+                    "text/plain"
+                )
+            
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        st.info("Please ensure your CSV file is properly formatted")
 
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-#poetry.toml
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-#pdm.lock
-#pdm.toml
-.pdm-python
-.pdm-build/
-
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-#pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Abstra
-# Abstra is an AI-powered process automation framework.
-# Ignore directories containing user credentials, local state, and settings.
-# Learn more at https://abstra.io/docs
-.abstra/
-
-# Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#  you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
-
-# Cursor
-#  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
-.cursorignore
-.cursorindexingignore
-
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+else:
+    st.info("Upload a CSV file to begin analysis")
+    
+    # Sample data generator
+    if st.button("Generate Sample Data"):
+        sample_data = {
+            'Date': pd.date_range('2023-01-01', periods=100),
+            'Sales_Amount': np.random.uniform(50, 500, 100).round(2),
+            'Category': np.random.choice(['Electronics', 'Clothing', 'Books', 'Home'], 100),
+            'Customer_Age': np.random.randint(18, 65, 100),
+            'Region': np.random.choice(['North', 'South', 'East', 'West'], 100),
+            'Rating': np.random.uniform(3.0, 5.0, 100).round(1)
+        }
+        
+        sample_df = pd.DataFrame(sample_data)
+        csv = sample_df.to_csv(index=False)
+        
+        st.download_button(
+            "Download Sample CSV",
+            csv,
+            "sample_ecommerce_data.csv",
+            "text/csv"
+        )
+        st.success("Sample data ready! Download and upload to test the tool.")
+!streamlit run ecommerce_app.py
